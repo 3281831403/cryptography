@@ -639,6 +639,16 @@ class TestCertificatePolicies:
         with pytest.raises(TypeError):
             x509.CertificatePolicies([typing.cast(typing.Any, 1), pi])
 
+    def test_empty_policies(self):
+        with pytest.raises(ValueError):
+            x509.CertificatePolicies([])
+
+    def test_duplicate_policy_identifier(self):
+        pi = x509.PolicyInformation(x509.ObjectIdentifier("1.2.3"), None)
+        pi2 = x509.PolicyInformation(x509.ObjectIdentifier("1.2.3"), ["cps"])
+        with pytest.raises(ValueError):
+            x509.CertificatePolicies([pi, pi2])
+
     def test_iter_len(self):
         pq = ["string"]
         pi = x509.PolicyInformation(x509.ObjectIdentifier("1.2.3"), pq)
@@ -3066,6 +3076,14 @@ class TestPolicyConstraints:
     def test_both_none(self):
         with pytest.raises(ValueError):
             x509.PolicyConstraints(None, None)
+
+    def test_negative_require_explicit_policy(self):
+        with pytest.raises(ValueError):
+            x509.PolicyConstraints(-1, None)
+
+    def test_negative_inhibit_policy_mapping(self):
+        with pytest.raises(ValueError):
+            x509.PolicyConstraints(None, -1)
 
     def test_repr(self):
         pc = x509.PolicyConstraints(0, None)

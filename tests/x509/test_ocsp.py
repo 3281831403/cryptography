@@ -514,6 +514,64 @@ class TestOCSPResponseBuilder:
                 typing.cast(typing.Any, 0),
             )
 
+    def test_invalid_next_update_before_this_update(self):
+        cert, issuer = _cert_and_issuer()
+        this_update = datetime.datetime(2026, 1, 1, 0, 0, 0)
+        builder = ocsp.OCSPResponseBuilder()
+        with pytest.raises(ValueError):
+            builder.add_response(
+                cert,
+                issuer,
+                hashes.SHA256(),
+                ocsp.OCSPCertStatus.GOOD,
+                this_update,
+                this_update - datetime.timedelta(seconds=1),
+                None,
+                None,
+            )
+
+    def test_invalid_revocation_time_after_this_update(self):
+        cert, issuer = _cert_and_issuer()
+        this_update = datetime.datetime(2026, 1, 1, 0, 0, 0)
+        builder = ocsp.OCSPResponseBuilder()
+        with pytest.raises(ValueError):
+            builder.add_response(
+                cert,
+                issuer,
+                hashes.SHA256(),
+                ocsp.OCSPCertStatus.REVOKED,
+                this_update,
+                this_update + datetime.timedelta(days=7),
+                this_update + datetime.timedelta(seconds=1),
+                None,
+            )
+
+    def test_equal_update_times_are_allowed(self):
+        cert, issuer = _cert_and_issuer()
+        root_cert, private_key = _generate_root()
+        this_update = datetime.datetime(2026, 1, 1, 0, 0, 0)
+        response = (
+            ocsp.OCSPResponseBuilder()
+            .responder_id(ocsp.OCSPResponderEncoding.NAME, root_cert)
+            .add_response(
+                cert,
+                issuer,
+                hashes.SHA1(),
+                ocsp.OCSPCertStatus.GOOD,
+                this_update,
+                this_update,
+                None,
+                None,
+            )
+            .sign(private_key, hashes.SHA256())
+        )
+        assert response.this_update_utc == this_update.replace(
+            tzinfo=datetime.timezone.utc
+        )
+        assert response.next_update_utc == this_update.replace(
+            tzinfo=datetime.timezone.utc
+        )
+
     def test_invalid_certificates(self):
         builder = ocsp.OCSPResponseBuilder()
         with pytest.raises(ValueError):

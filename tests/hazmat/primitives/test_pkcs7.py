@@ -20,7 +20,7 @@ from cryptography.hazmat.bindings._rust import (
     test_support,
 )
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ed25519, padding, rsa
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa
 from cryptography.hazmat.primitives.ciphers import algorithms
 from cryptography.hazmat.primitives.serialization import pkcs7
 from tests.doubles import DummyRSAPrivateKey
@@ -236,6 +236,24 @@ class TestPKCS7SignatureBuilder:
                 cert,
                 typing.cast(typing.Any, key),
                 hashes.SHA256(),
+            )
+
+    def test_signer_key_does_not_match_certificate(self):
+        cert, _ = _load_cert_key()
+        wrong_key = rsa.generate_private_key(
+            public_exponent=65537, key_size=2048
+        )
+        with pytest.raises(ValueError):
+            pkcs7.PKCS7SignatureBuilder().add_signer(
+                cert, wrong_key, hashes.SHA256()
+            )
+
+    def test_signer_key_algorithm_does_not_match_certificate(self):
+        cert, _ = _load_cert_key()
+        ec_key = ec.generate_private_key(ec.SECP256R1())
+        with pytest.raises(ValueError):
+            pkcs7.PKCS7SignatureBuilder().add_signer(
+                cert, ec_key, hashes.SHA256()
             )
 
     def test_sign_invalid_options(self):

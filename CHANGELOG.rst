@@ -34,6 +34,25 @@ Changelog
   when constructed with an empty list. Building a certificate with one of
   these produced an extension that the parser rejects, since RFC 5280
   4.2.1.6/4.2.1.7/4.2.1.12 constrain all three fields to ``SIZE (1..MAX)``.
+* :class:`~cryptography.x509.CertificatePolicies` now raises ``ValueError``
+  when constructed with an empty list or with two
+  :class:`~cryptography.x509.PolicyInformation` objects sharing the same
+  policy OID, and :class:`~cryptography.x509.PolicyConstraints` now raises
+  ``ValueError`` for negative ``require_explicit_policy`` or
+  ``inhibit_policy_mapping`` values.
+* :meth:`~cryptography.x509.CertificateBuilder.sign` and
+  :meth:`~cryptography.x509.CertificateBuilder.create_unsigned` now raise
+  ``ValueError`` when a certificate includes a
+  :class:`~cryptography.x509.BasicConstraints` extension with ``ca=False``
+  alongside a :class:`~cryptography.x509.KeyUsage` extension with
+  ``key_cert_sign`` set or a :class:`~cryptography.x509.NameConstraints`
+  extension, as these combinations are prohibited by RFC 5280.
+* :class:`~cryptography.x509.ocsp.OCSPResponseBuilder` now raises
+  ``ValueError`` when ``next_update`` is earlier than ``this_update`` or
+  ``revocation_time`` is later than ``this_update``.
+* :meth:`~cryptography.hazmat.primitives.serialization.pkcs7.PKCS7SignatureBuilder.add_signer`
+  now raises ``ValueError`` when the private key does not correspond to the
+  certificate's public key.
 * :meth:`~cryptography.hazmat.primitives.asymmetric.ec.EllipticCurvePrivateNumbers.private_key`
   now raises ``ValueError`` when ``private_value`` is not smaller than the
   curve's order, matching

@@ -29,8 +29,11 @@ from cryptography.hazmat.primitives.asymmetric.types import (
     CertificatePublicKeyTypes,
 )
 from cryptography.x509.extensions import (
+    BasicConstraints,
     Extension,
     ExtensionType,
+    KeyUsage,
+    NameConstraints,
     _make_sequence_methods,
 )
 from cryptography.x509.name import Name, _ASN1Type
@@ -76,6 +79,35 @@ def _reject_duplicate_attribute(
     for attr_oid, _, _ in attributes:
         if attr_oid == oid:
             raise ValueError("This attribute has already been set.")
+
+
+def _reject_invalid_certificate_extension_combination(
+    extensions: list[Extension[ExtensionType]],
+) -> None:
+    basic_constraints = next(
+        (
+            ext.value
+            for ext in extensions
+            if isinstance(ext.value, BasicConstraints)
+        ),
+        None,
+    )
+    # Only reject the explicit contradiction. A certificate without a
+    # BasicConstraints extension (or one marked as a CA) is unaffected.
+    if basic_constraints is None or basic_constraints.ca:
+        return
+
+    for ext in extensions:
+        if isinstance(ext.value, KeyUsage) and ext.value.key_cert_sign:
+            raise ValueError(
+                "key_cert_sign must not be set in KeyUsage when "
+                "BasicConstraints.ca is False"
+            )
+        if isinstance(ext.value, NameConstraints):
+            raise ValueError(
+                "NameConstraints must not be present when "
+                "BasicConstraints.ca is False"
+            )
 
 
 def _convert_to_naive_utc_time(time: datetime.datetime) -> datetime.datetime:
@@ -566,6 +598,8 @@ class CertificateBuilder:
                     "Deterministic ECDSA is only supported for EC keys"
                 )
 
+        _reject_invalid_certificate_extension_combination(self._extensions)
+
         return rust_x509.create_x509_certificate(
             self,
             private_key,
@@ -595,6 +629,8 @@ class CertificateBuilder:
 
         if self._public_key is None:
             raise ValueError("A certificate must have a public key")
+
+        _reject_invalid_certificate_extension_combination(self._extensions)
 
         return rust_x509.create_x509_certificate(
             self,

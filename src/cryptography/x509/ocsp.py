@@ -71,6 +71,10 @@ class _SingleResponse:
             next_update, datetime.datetime
         ):
             raise TypeError("next_update must be a datetime object or None")
+        if next_update is not None and next_update < this_update:
+            raise ValueError(
+                "next_update must not be earlier than this_update"
+            )
 
         self._resp = resp
         self._resp_hash = resp_hash
@@ -96,6 +100,10 @@ class _SingleResponse:
         else:
             if not isinstance(revocation_time, datetime.datetime):
                 raise TypeError("revocation_time must be a datetime object")
+            if revocation_time > this_update:
+                raise ValueError(
+                    "revocation_time must not be later than this_update"
+                )
 
             if revocation_reason is not None and not isinstance(
                 revocation_reason, x509.ReasonFlags

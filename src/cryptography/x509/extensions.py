@@ -765,11 +765,20 @@ class PolicyConstraints(ExtensionType):
                 "require_explicit_policy must be a non-negative integer or "
                 "None"
             )
+        if require_explicit_policy is not None and require_explicit_policy < 0:
+            raise ValueError(
+                "require_explicit_policy must be a non-negative integer or "
+                "None"
+            )
 
         if inhibit_policy_mapping is not None and not isinstance(
             inhibit_policy_mapping, int
         ):
             raise TypeError(
+                "inhibit_policy_mapping must be a non-negative integer or None"
+            )
+        if inhibit_policy_mapping is not None and inhibit_policy_mapping < 0:
+            raise ValueError(
                 "inhibit_policy_mapping must be a non-negative integer or None"
             )
 
@@ -820,9 +829,17 @@ class CertificatePolicies(ExtensionType):
 
     def __init__(self, policies: Iterable[PolicyInformation]) -> None:
         policies = list(policies)
+        if not policies:
+            raise ValueError("policies must be a non-empty list")
         if not all(isinstance(x, PolicyInformation) for x in policies):
             raise TypeError(
                 "Every item in the policies list must be a PolicyInformation"
+            )
+        policy_oids = [p.policy_identifier for p in policies]
+        if len(set(policy_oids)) != len(policy_oids):
+            raise ValueError(
+                "policy_identifier values must be unique within a "
+                "CertificatePolicies extension"
             )
 
         self._policies = policies

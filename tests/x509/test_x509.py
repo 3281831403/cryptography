@@ -3428,6 +3428,97 @@ class TestCertificateBuilder:
                 False,
             )
 
+    def _valid_builder(self, rsa_key_2048: rsa.RSAPrivateKey):
+        return (
+            x509.CertificateBuilder()
+            .subject_name(
+                x509.Name([x509.NameAttribute(NameOID.COUNTRY_NAME, "US")])
+            )
+            .issuer_name(
+                x509.Name([x509.NameAttribute(NameOID.COUNTRY_NAME, "US")])
+            )
+            .serial_number(1)
+            .public_key(rsa_key_2048.public_key())
+            .not_valid_before(datetime.datetime(2002, 1, 1, 12, 1))
+            .not_valid_after(datetime.datetime(2030, 12, 31, 8, 30))
+        )
+
+    def test_sign_ca_false_with_key_cert_sign_rejected(
+        self, rsa_key_2048: rsa.RSAPrivateKey
+    ):
+        builder = (
+            self._valid_builder(rsa_key_2048)
+            .add_extension(
+                x509.BasicConstraints(ca=False, path_length=None),
+                critical=True,
+            )
+            .add_extension(
+                x509.KeyUsage(
+                    digital_signature=True,
+                    content_commitment=False,
+                    key_encipherment=False,
+                    data_encipherment=False,
+                    key_agreement=False,
+                    key_cert_sign=True,
+                    crl_sign=False,
+                    encipher_only=False,
+                    decipher_only=False,
+                ),
+                critical=True,
+            )
+        )
+        with pytest.raises(ValueError):
+            builder.sign(rsa_key_2048, hashes.SHA256())
+        with pytest.raises(ValueError):
+            builder.create_unsigned()
+
+    def test_sign_ca_false_with_name_constraints_rejected(
+        self, rsa_key_2048: rsa.RSAPrivateKey
+    ):
+        builder = (
+            self._valid_builder(rsa_key_2048)
+            .add_extension(
+                x509.BasicConstraints(ca=False, path_length=None),
+                critical=True,
+            )
+            .add_extension(
+                x509.NameConstraints(
+                    permitted_subtrees=[x509.DNSName(".example.com")],
+                    excluded_subtrees=None,
+                ),
+                critical=True,
+            )
+        )
+        with pytest.raises(ValueError):
+            builder.sign(rsa_key_2048, hashes.SHA256())
+        with pytest.raises(ValueError):
+            builder.create_unsigned()
+
+    def test_sign_key_cert_sign_without_basic_constraints_allowed(
+        self, rsa_key_2048: rsa.RSAPrivateKey
+    ):
+        builder = self._valid_builder(rsa_key_2048).add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=True,
+                crl_sign=False,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        cert = builder.sign(rsa_key_2048, hashes.SHA256())
+        assert (
+            cert.extensions.get_extension_for_class(
+                x509.KeyUsage
+            ).value.key_cert_sign
+            is True
+        )
+
     @pytest.mark.parametrize("algorithm", [object(), None])
     def test_sign_with_unsupported_hash(
         self, rsa_key_2048: rsa.RSAPrivateKey, algorithm

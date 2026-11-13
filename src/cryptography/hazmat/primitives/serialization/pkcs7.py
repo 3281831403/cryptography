@@ -44,6 +44,29 @@ ContentEncryptionAlgorithm = typing.Union[
 ]
 
 
+def _public_key_matches_private_key(
+    public_key: object, private_key: PKCS7PrivateKeyTypes
+) -> bool:
+    # Only RSA and EC keys are supported by add_signer, so comparing their
+    # public numbers is sufficient.
+    try:
+        if isinstance(private_key, rsa.RSAPrivateKey):
+            return (
+                isinstance(public_key, rsa.RSAPublicKey)
+                and public_key.public_numbers()
+                == private_key.public_key().public_numbers()
+            )
+        elif isinstance(private_key, ec.EllipticCurvePrivateKey):
+            return (
+                isinstance(public_key, ec.EllipticCurvePublicKey)
+                and public_key.public_numbers()
+                == private_key.public_key().public_numbers()
+            )
+    except AttributeError:
+        return False
+    return False
+
+
 class PKCS7Options(utils.Enum):
     Text = "Add text/plain MIME type"
     Binary = "Don't translate input data into canonical MIME format"
@@ -112,6 +135,13 @@ class PKCS7SignatureBuilder:
                 raise TypeError("Padding must be PSS or PKCS1v15")
             if not isinstance(private_key, rsa.RSAPrivateKey):
                 raise TypeError("Padding is only supported for RSA keys")
+
+        if not _public_key_matches_private_key(
+            certificate.public_key(), private_key
+        ):
+            raise ValueError(
+                "The private key does not match the certificate's public key"
+            )
 
         return PKCS7SignatureBuilder(
             self._data,
