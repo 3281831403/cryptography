@@ -413,6 +413,22 @@ class TestOpenSSHSerialization:
         f.put_mpint(0x80)
         assert f.tobytes() == b"\0\0\0\0" + b"\0\0\0\x02" + b"\0\x80"
 
+    def test_get_mpint_rejects_non_canonical_encodings(self):
+        # RFC 4251 section 5 requires canonical mpint encodings.
+        with pytest.raises(ValueError):
+            ssh._get_mpint(memoryview(b"\x00\x00\x00\x01\x00"))
+        with pytest.raises(ValueError):
+            ssh._get_mpint(memoryview(b"\x00\x00\x00\x02\x00\x01"))
+        val, rest = ssh._get_mpint(memoryview(b"\x00\x00\x00\x00"))
+        assert val == 0
+        assert len(rest) == 0
+        val, rest = ssh._get_mpint(memoryview(b"\x00\x00\x00\x01\x7f"))
+        assert val == 0x7F
+        assert len(rest) == 0
+        val, rest = ssh._get_mpint(memoryview(b"\x00\x00\x00\x02\x00\x80"))
+        assert val == 0x80
+        assert len(rest) == 0
+
     def make_file(
         self,
         magic=b"openssh-key-v1\0",
@@ -1591,6 +1607,145 @@ class TestSSHCertificate:
             pytest.skip("FIPS does not support RSA SHA1")
         with pytest.raises(InvalidSignature):
             cert.verify_cert_signature()
+
+    def _build_cert(
+        self,
+        ca_key,
+        principal=b"root",
+        valid_after=0,
+        valid_before=2**63,
+    ):
+        public_key = ec.generate_private_key(ec.SECP256R1()).public_key()
+        cert = (
+            SSHCertificateBuilder()
+            .public_key(public_key)
+            .type(SSHCertificateType.USER)
+            .key_id(b"test")
+            .valid_principals([principal])
+            .valid_after(valid_after)
+            .valid_before(valid_before)
+            .sign(ca_key)
+        )
+        assert isinstance(cert, SSHCertificate)
+        return cert
+
+    def test_verify_authority(self):
+        for ca_key in (
+            ec.generate_private_key(ec.SECP256R1()),
+            ed25519.Ed25519PrivateKey.generate(),
+            rsa.generate_private_key(public_exponent=65537, key_size=2048),
+        ):
+            cert = self._build_cert(ca_key)
+            cert.verify_authority(
+                ca_key.public_key(), SSHCertificateType.USER, b"root", 1
+            )
+
+    def test_verify_authority_wrong_key(self):
+        ca_key = ec.generate_private_key(ec.SECP256R1())
+        cert = self._build_cert(ca_key)
+        other_key = ec.generate_private_key(ec.SECP256R1())
+        with pytest.raises(ValueError):
+            cert.verify_authority(
+                other_key.public_key(), SSHCertificateType.USER, b"root", 1
+            )
+
+    def test_verify_authority_wrong_key_type(self):
+        ca_key = ec.generate_private_key(ec.SECP256R1())
+        cert = self._build_cert(ca_key)
+        with pytest.raises(ValueError):
+            cert.verify_authority(
+                ed25519.Ed25519PrivateKey.generate().public_key(),
+                SSHCertificateType.USER,
+                b"root",
+                1,
+            )
+
+    def test_verify_authority_wrong_type(self):
+        ca_key = ec.generate_private_key(ec.SECP256R1())
+        cert = self._build_cert(ca_key)
+        with pytest.raises(ValueError):
+            cert.verify_authority(
+                ca_key.public_key(), SSHCertificateType.HOST, b"root", 1
+            )
+
+    def test_verify_authority_wrong_principal(self):
+        ca_key = ec.generate_private_key(ec.SECP256R1())
+        cert = self._build_cert(ca_key, principal=b"root")
+        with pytest.raises(ValueError):
+            cert.verify_authority(
+                ca_key.public_key(), SSHCertificateType.USER, b"other", 1
+            )
+
+    def test_verify_authority_any_principal(self):
+        ca_key = ec.generate_private_key(ec.SECP256R1())
+        public_key = ec.generate_private_key(ec.SECP256R1()).public_key()
+        cert = (
+            SSHCertificateBuilder()
+            .public_key(public_key)
+            .type(SSHCertificateType.USER)
+            .key_id(b"test")
+            .valid_for_all_principals()
+            .valid_after(0)
+            .valid_before(2**63)
+            .sign(ca_key)
+        )
+        assert isinstance(cert, SSHCertificate)
+        cert.verify_authority(
+            ca_key.public_key(), SSHCertificateType.USER, b"anything", 1
+        )
+
+    def test_verify_authority_validity_period(self):
+        ca_key = ec.generate_private_key(ec.SECP256R1())
+        cert = self._build_cert(ca_key, valid_after=10, valid_before=20)
+        # The validity period is left-closed and right-open.
+        cert.verify_authority(
+            ca_key.public_key(), SSHCertificateType.USER, b"root", 10
+        )
+        cert.verify_authority(
+            ca_key.public_key(), SSHCertificateType.USER, b"root", 19
+        )
+        with pytest.raises(ValueError):
+            cert.verify_authority(
+                ca_key.public_key(), SSHCertificateType.USER, b"root", 9
+            )
+        with pytest.raises(ValueError):
+            cert.verify_authority(
+                ca_key.public_key(), SSHCertificateType.USER, b"root", 20
+            )
+
+    def test_verify_signature_rejects_non_canonical_mpint(self):
+        ca_key = ec.generate_private_key(ec.SECP256R1())
+        cert = self._build_cert(ca_key)
+        r, rest = ssh._get_sshstr(cert._signature)
+        s, rest = ssh._get_sshstr(rest)
+        assert len(rest) == 0
+        patched = ssh._FragList()
+        patched.put_sshstr(b"\x00" + bytes(r))
+        patched.put_sshstr(bytes(s))
+        cert._signature = memoryview(patched.tobytes())
+        with pytest.raises(ValueError):
+            cert.verify_cert_signature()
+        with pytest.raises(ValueError):
+            cert.verify_authority(
+                ca_key.public_key(), SSHCertificateType.USER, b"root", 1
+            )
+
+    def test_load_cert_too_many_principals(self):
+        ca_key = ec.generate_private_key(ec.SECP256R1())
+        public_key = ec.generate_private_key(ec.SECP256R1()).public_key()
+        builder = SSHCertificateBuilder(
+            _public_key=public_key,
+            _serial=0,
+            _type=SSHCertificateType.USER,
+            _key_id=b"test",
+            _valid_principals=[
+                b"p%d" % i for i in range(ssh._SSHKEY_CERT_MAX_PRINCIPALS + 1)
+            ],
+            _valid_before=2**63,
+            _valid_after=0,
+        )
+        with pytest.raises(ValueError):
+            builder.sign(ca_key)
 
     def test_not_bytes(self):
         with pytest.raises(TypeError):

@@ -760,6 +760,28 @@ The format used by OpenSSH for certificates, as specified in
         :raises: :class:`~cryptography.exceptions.InvalidSignature` if the
             signature is invalid.
 
+    .. method:: verify_authority(ca_public_key, type, principal, when)
+
+        .. versionadded:: 51.0.0
+
+        Verifies that the certificate's signature was produced by the
+        provided CA public key and that the certificate is valid for the
+        given type, principal and time.
+
+        :param ca_public_key: The public key of the certificate authority,
+            one of :data:`SSHCertPublicKeyTypes`.
+        :param type: The expected :class:`SSHCertificateType`.
+        :param principal: The expected principal as bytes. If the certificate
+            has an empty ``valid_principals`` list (i.e. it is valid for any
+            principal of the given type), any principal is accepted.
+        :param when: The Unix timestamp at which the certificate is being
+            validated. The certificate is considered valid when
+            ``valid_after <= when < valid_before``.
+
+        :return: None
+        :raises ValueError: If the signature is invalid or if the type,
+            principal or time does not match.
+
     .. method:: public_bytes()
 
         :return: The serialized certificate in OpenSSH format.

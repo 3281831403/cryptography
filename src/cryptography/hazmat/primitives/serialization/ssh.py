@@ -13,7 +13,7 @@ import warnings
 from dataclasses import dataclass
 
 from cryptography import utils
-from cryptography.exceptions import UnsupportedAlgorithm
+from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import (
     dsa,
@@ -231,6 +231,11 @@ def _get_mpint(data: memoryview) -> tuple[int, memoryview]:
     """Big integer."""
     val, data = _get_sshstr(data)
     if val and val[0] > 0x7F:
+        raise ValueError("Invalid data")
+    # RFC 4251 section 5 requires canonical mpint encodings: zero is the
+    # empty string and a leading zero byte is only permitted when it is
+    # required to keep the value positive.
+    if val and val[0] == 0 and (len(val) == 1 or not (val[1] & 0x80)):
         raise ValueError("Invalid data")
     return int.from_bytes(val, "big"), data
 
@@ -1175,12 +1180,31 @@ class SSHCertificate:
         )
 
     def verify_cert_signature(self) -> None:
-        signature_key = self.signature_key()
-        if isinstance(signature_key, ed25519.Ed25519PublicKey):
+        self._verify_signature(self.signature_key())
+
+    def _verify_signature(self, signature_key: SSHCertPublicKeyTypes) -> None:
+        if self._sig_type == _SSH_MLDSA44_ED25519:
+            raise UnsupportedAlgorithm(
+                "Certificates signed with ssh-mldsa44-ed25519 keys are not "
+                "supported"
+            )
+        if self._sig_type == _SSH_ED25519:
+            if not isinstance(signature_key, ed25519.Ed25519PublicKey):
+                raise ValueError(
+                    "Signature key type does not match certificate"
+                )
             signature_key.verify(
                 bytes(self._signature), bytes(self._tbs_cert_body)
             )
-        elif isinstance(signature_key, ec.EllipticCurvePublicKey):
+        elif self._sig_type in (
+            _ECDSA_NISTP256,
+            _ECDSA_NISTP384,
+            _ECDSA_NISTP521,
+        ):
+            if not isinstance(signature_key, ec.EllipticCurvePublicKey):
+                raise ValueError(
+                    "Signature key type does not match certificate"
+                )
             # The signature is encoded as a pair of big-endian integers
             r, data = _get_mpint(self._signature)
             s, data = _get_mpint(data)
@@ -1191,7 +1215,12 @@ class SSHCertificate:
                 computed_sig, bytes(self._tbs_cert_body), ec.ECDSA(hash_alg)
             )
         else:
-            assert isinstance(signature_key, rsa.RSAPublicKey)
+            if self._sig_type != _SSH_RSA:
+                raise ValueError("Unsupported certificate signature type")
+            if not isinstance(signature_key, rsa.RSAPublicKey):
+                raise ValueError(
+                    "Signature key type does not match certificate"
+                )
             if self._inner_sig_type == _SSH_RSA:
                 hash_alg = hashes.SHA1()
             elif self._inner_sig_type == _SSH_RSA_SHA256:
@@ -1205,6 +1234,25 @@ class SSHCertificate:
                 padding.PKCS1v15(),
                 hash_alg,
             )
+
+    def verify_authority(
+        self,
+        ca_public_key: SSHCertPublicKeyTypes,
+        type: SSHCertificateType,
+        principal: bytes,
+        when: int,
+    ) -> None:
+        try:
+            self._verify_signature(ca_public_key)
+        except InvalidSignature:
+            raise ValueError("Invalid signature") from None
+
+        if type != self.type:
+            raise ValueError("Certificate type does not match")
+        if self._valid_principals and principal not in self._valid_principals:
+            raise ValueError("Certificate principal does not match")
+        if not (self._valid_after <= when < self._valid_before):
+            raise ValueError("Certificate is not valid at the given time")
 
 
 def _get_ec_hash_alg(curve: ec.EllipticCurve) -> hashes.HashAlgorithm:
@@ -1266,6 +1314,10 @@ def _load_ssh_public_identity(
             if 0 in principal:
                 raise ValueError("Invalid NUL byte in principal")
             valid_principals.append(bytes(principal))
+        if len(valid_principals) > _SSHKEY_CERT_MAX_PRINCIPALS:
+            raise ValueError(
+                "Reached or exceeded the maximum number of valid_principals"
+            )
         valid_after, rest = _get_u64(rest)
         valid_before, rest = _get_u64(rest)
         crit_options, rest = _get_sshstr(rest)

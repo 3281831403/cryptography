@@ -59,6 +59,12 @@ Changelog
   :meth:`~cryptography.hazmat.primitives.hashes.SHAKE256.xof` and
   :meth:`~cryptography.hazmat.asn1.TLV.parse`. Previously, type checkers
   treated their return values as ``Any``.
+* Added :meth:`~cryptography.hazmat.primitives.serialization.SSHCertificate.verify_authority`,
+  which verifies an SSH certificate's signature using a caller-provided CA
+  public key and checks the certificate type, principal and validity period.
+* SSH certificate parsing now rejects certificates with more than 256
+  principals, and SSH ``mpint`` parsing rejects non-canonical encodings as
+  required by :rfc:`4251`.
 
 .. _v50-0-2:
 
